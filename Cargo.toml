@@ -19,6 +19,7 @@ zeroize = "1.8.1"
 dashmap =  { version = "*", features = ["rayon", "inline"] }
 ring = "0.17.14"
 blake3 = "1.8.2"
+rand = "0.8.5"
 
 [profile.release]
 lto = "fat"
