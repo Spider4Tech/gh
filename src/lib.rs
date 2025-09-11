@@ -45,3 +45,6 @@ mod tests {
         assert_eq!(original_data, final_data);
     }
 }
+
+#[cfg(test)]
+mod test;
