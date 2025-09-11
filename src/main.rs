@@ -59,10 +59,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("Strip/Unescape: {:?}", start_strip.elapsed());
 
     if final_data != original_data {
-        println!("❌ Data mismatch!");
+        println!("Data mismatch!");
         return Err("Data integrity check failed".into());
     } else {
-        println!("✅ Encryption/Decryption successful - Data integrity verified!");
+        println!("Encryption/Decryption successful - Data integrity verified!");
     }
 
     println!("Total test time: {:?}", start_all.elapsed());
