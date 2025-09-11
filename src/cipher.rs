@@ -406,7 +406,7 @@ pub fn build_cipher_cache(
 
     let inverse_rows: Vec<[u8; 256]> = rows
         .par_iter()
-        .map(|row| build_inverse_lookup(row))
+        .map(build_inverse_lookup)
         .collect();
 
     let cache = CipherCache {
