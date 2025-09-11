@@ -1,23 +1,5 @@
 // src/test.rs
-    use std::time::Instant;
 
-
-    use crate::SALT_LEN;
-
-
-    use crate::fill_random;
-
-
-    use crate::gene3_with_salt;
-
-
-    use crate::ROUND;
-
-
-    use crate::encrypt3_final;
-
-
-    use crate::decrypt3_final;
 
 #[cfg(test)]
 mod tests {
@@ -25,7 +7,7 @@ mod tests {
     use secrecy::ExposeSecret;
     use zeroize::Zeroize;
     use rand::Rng;
-        use std::time::Instant;
+    use std::time::Instant;
 
 
     use crate::SALT_LEN;
