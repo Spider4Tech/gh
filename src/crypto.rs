@@ -40,12 +40,12 @@ pub fn generate_custom_sbox(key: &[u8; 32]) -> [u8; 256] {
     }
     // Ensure the S-Box is a permutation (bijective)
     let mut used = [false; 256];
-    for i in 0..256 {
-        let mut j = sbox[i] as usize;
+    for item in &mut sbox {
+        let mut j = *item as usize;
         while used[j] {
             j = (j + 1) % 256;
         }
-        sbox[i] = j as u8;
+        *item = j as u8;
         used[j] = true;
     }
     sbox
