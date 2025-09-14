@@ -33,15 +33,22 @@ pub fn constant_time_lookup_256(table: &[u8; 256], index: u8) -> u8 {
 
     let mut i = 0usize;
     while i < 256 {
-        let mask0 = if i == idx { 0xFF } else { 0x00 };
-        let mask1 = if i + 1 == idx { 0xFF } else { 0x00 };
-        let mask2 = if i + 2 == idx { 0xFF } else { 0x00 };
-        let mask3 = if i + 3 == idx { 0xFF } else { 0x00 };
-
+        // Branchless masks: 0xFF when equal, 0x00 otherwise
+        let mask0: u8 = u8::from(i == idx).wrapping_neg();
         result |= table[i] & mask0;
-        if i + 1 < 256 { result |= table[i + 1] & mask1; }
-        if i + 2 < 256 { result |= table[i + 2] & mask2; }
-        if i + 3 < 256 { result |= table[i + 3] & mask3; }
+
+        if i + 1 < 256 {
+            let mask1: u8 = u8::from(i + 1 == idx).wrapping_neg();
+            result |= table[i + 1] & mask1;
+        }
+        if i + 2 < 256 {
+            let mask2: u8 = u8::from(i + 2 == idx).wrapping_neg();
+            result |= table[i + 2] & mask2;
+        }
+        if i + 3 < 256 {
+            let mask3: u8 = u8::from(i + 3 == idx).wrapping_neg();
+            result |= table[i + 3] & mask3;
+        }
 
         i += 4;
     }
@@ -66,22 +73,29 @@ pub fn constant_time_lookup_256(table: &[u8; 256], index: u8) -> u8 {
 /// 
 /// Uses constant-time execution to prevent timing attacks by accessing
 /// all array elements regardless of the target value.
-#[inline] 
+#[inline]
 pub fn constant_time_position_lookup(positions: &[usize; 256], value: u8) -> usize {
     let mut result = 0usize;
     let val = value as usize;
 
     let mut i = 0usize;
     while i < 256 {
-        let mask0 = if i == val { usize::MAX } else { 0 };
-        let mask1 = if i + 1 == val { usize::MAX } else { 0 };
-        let mask2 = if i + 2 == val { usize::MAX } else { 0 };
-        let mask3 = if i + 3 == val { usize::MAX } else { 0 };
-
+        // Branchless masks: usize::MAX when equal, 0 otherwise
+        let mask0: usize = (!0usize) * (usize::from(i == val));
         result |= positions[i] & mask0;
-        if i + 1 < 256 { result |= positions[i + 1] & mask1; }
-        if i + 2 < 256 { result |= positions[i + 2] & mask2; }
-        if i + 3 < 256 { result |= positions[i + 3] & mask3; }
+
+        if i + 1 < 256 {
+            let mask1: usize = (!0usize) * (usize::from(i + 1 == val));
+            result |= positions[i + 1] & mask1;
+        }
+        if i + 2 < 256 {
+            let mask2: usize = (!0usize) * (usize::from(i + 2 == val));
+            result |= positions[i + 2] & mask2;
+        }
+        if i + 3 < 256 {
+            let mask3: usize = (!0usize) * (usize::from(i + 3 == val));
+            result |= positions[i + 3] & mask3;
+        }
 
         i += 4;
     }
@@ -112,15 +126,22 @@ pub fn constant_time_character_lookup(characters: &[u8; 256], index: usize) -> u
 
     let mut i = 0usize;
     while i < 256 {
-        let mask0 = if i == index { 0xFF } else { 0x00 };
-        let mask1 = if i + 1 == index { 0xFF } else { 0x00 };
-        let mask2 = if i + 2 == index { 0xFF } else { 0x00 };
-        let mask3 = if i + 3 == index { 0xFF } else { 0x00 };
-
+        // Branchless masks: 0xFF when equal, 0x00 otherwise
+        let mask0: u8 = u8::from(i == index).wrapping_neg();
         result |= characters[i] & mask0;
-        if i + 1 < 256 { result |= characters[i + 1] & mask1; }
-        if i + 2 < 256 { result |= characters[i + 2] & mask2; }
-        if i + 3 < 256 { result |= characters[i + 3] & mask3; }
+
+        if i + 1 < 256 {
+            let mask1: u8 = u8::from(i + 1 == index).wrapping_neg();
+            result |= characters[i + 1] & mask1;
+        }
+        if i + 2 < 256 {
+            let mask2: u8 = u8::from(i + 2 == index).wrapping_neg();
+            result |= characters[i + 2] & mask2;
+        }
+        if i + 3 < 256 {
+            let mask3: u8 = u8::from(i + 3 == index).wrapping_neg();
+            result |= characters[i + 3] & mask3;
+        }
 
         i += 4;
     }
@@ -462,11 +483,14 @@ pub fn encrypt_core_optimized(
     let mut offset: usize = 0;
     let mut chunk_index: u64 = 0;
 
+    // Reuse a single keystream buffer to avoid repeated allocations
+    let mut keystream = vec![0u8; std::cmp::min(plain_text.len(), BLAKE3_KEYSTREAM_CHUNK)];
+
     while offset < plain_text.len() {
         let remaining = plain_text.len() - offset;
         let this = std::cmp::min(remaining, BLAKE3_KEYSTREAM_CHUNK);
 
-        let mut keystream = vec![0u8; this];
+        if keystream.len() != this { keystream.resize(this, 0); }
         blake3_stream_for_chunk(xor_key, Some(run_salt), b"xor_stream_v1", chunk_index, &mut keystream);
 
         {
@@ -483,24 +507,21 @@ pub fn encrypt_core_optimized(
                     let row = cache.key2_chars[pos % cache.key2_chars.len()] & 0xFF;
                     let map_index = (table_2d << 8) | row;
 
-                    if let Some(&row_idx) = cache.index_map.get(map_index) {
-                        if row_idx != usize::MAX {
-                            let transformed = constant_time_lookup_256(&cache.rows[row_idx], s);
-                            *d = transformed ^ k;
-                        } else {
-                            *d = s ^ k;
-                        }
+                    let row_idx = cache.index_map[map_index];
+                    if row_idx != usize::MAX {
+                        let transformed = constant_time_lookup_256(&cache.rows[row_idx], s);
+                        *d = transformed ^ k;
                     } else {
                         *d = s ^ k;
                     }
                 });
         }
 
-        keystream.zeroize();
         offset += this;
         chunk_index = chunk_index.wrapping_add(1);
     }
 
+    keystream.zeroize();
     cipher_text
 }
 
@@ -539,11 +560,14 @@ pub fn decrypt_core_optimized(
     let mut offset: usize = 0;
     let mut chunk_index: u64 = 0;
 
+    // Reuse a single keystream buffer to avoid repeated allocations
+    let mut keystream = vec![0u8; std::cmp::min(cipher_text.len(), BLAKE3_KEYSTREAM_CHUNK)];
+
     while offset < cipher_text.len() {
         let remaining = cipher_text.len() - offset;
         let this = std::cmp::min(remaining, BLAKE3_KEYSTREAM_CHUNK);
 
-        let mut keystream = vec![0u8; this];
+        if keystream.len() != this { keystream.resize(this, 0); }
         blake3_stream_for_chunk(xor_key, Some(run_salt), b"xor_stream_v1", chunk_index, &mut keystream);
 
         {
@@ -562,23 +586,20 @@ pub fn decrypt_core_optimized(
 
                     let xor_result = s ^ k;
 
-                    if let Some(&row_idx) = cache.index_map.get(map_index) {
-                        if row_idx != usize::MAX {
-                            *d = constant_time_lookup_256(&cache.inverse_rows[row_idx], xor_result);
-                        } else {
-                            *d = xor_result;
-                        }
+                    let row_idx = cache.index_map[map_index];
+                    if row_idx != usize::MAX {
+                        *d = constant_time_lookup_256(&cache.inverse_rows[row_idx], xor_result);
                     } else {
                         *d = xor_result;
                     }
                 });
         }
 
-        keystream.zeroize();
         offset += this;
         chunk_index = chunk_index.wrapping_add(1);
     }
 
+    keystream.zeroize();
     plain_text
 }
 

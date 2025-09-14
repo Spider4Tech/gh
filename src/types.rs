@@ -15,10 +15,10 @@ pub const VERSION: u8 = 9;
 pub const ALG_ID: u8 = 173;
 
 /// Chunk size for Blake3 keystream generation in bytes
-pub const BLAKE3_KEYSTREAM_CHUNK: usize = 4096;
+pub const BLAKE3_KEYSTREAM_CHUNK: usize = 16384;
 
 /// Optimal chunk size for parallel processing in bytes
-pub const OPTIMAL_CHUNK_SIZE: usize = 1024;
+pub const OPTIMAL_CHUNK_SIZE: usize = 65536;
 
 /// Number of encryption rounds to perform
 pub const ROUND: usize = 4;
@@ -66,7 +66,8 @@ pub struct CacheKey {
 /// This lazy-initialized concurrent hash map stores precomputed cipher caches
 /// to avoid redundant expensive calculations across multiple operations.
 pub static CIPHER_CACHE_STORE: Lazy<DashMap<CacheKey, CipherCache>> = Lazy::new(|| {
-    DashMap::with_capacity(8) 
+    // Inline storage for small maps reduces allocations; tune shards internally
+    DashMap::with_capacity(16)
 });
 
 impl Zeroize for CipherCache {

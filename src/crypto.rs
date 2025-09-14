@@ -86,9 +86,7 @@ pub fn generate_custom_sbox(key: &[u8]) -> [u8; 256] {
         }
         if collision {
             // fallback to AES SBOX (bijective)
-            for _ in 0..256 {
-                sbox.copy_from_slice(&AES_SBOX);
-            }
+            sbox.copy_from_slice(&AES_SBOX);
         }
     }
 
