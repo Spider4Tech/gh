@@ -21,7 +21,7 @@ pub const BLAKE3_KEYSTREAM_CHUNK: usize = 4096;
 pub const OPTIMAL_CHUNK_SIZE: usize = 1024;
 
 /// Number of encryption rounds to perform
-pub const ROUND: usize = 5;
+pub const ROUND: usize = 4;
 
 /// AES forward substitution box for cryptographic transformations
 pub static AES_SBOX: [u8; 256] = [

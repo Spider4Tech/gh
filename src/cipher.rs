@@ -594,7 +594,7 @@ pub fn encrypt3_final(
     let mut body = data;
 
     let rounds = std::cmp::min(ROUND, round_keys.len());
-    println!("Encrypting {} rounds", rounds);
+    println!("Encrypting {rounds} rounds");
 
     let mut r = 0usize;
     while r < rounds {
@@ -666,7 +666,7 @@ pub fn decrypt3_final(
     let mut plaintext = body.to_vec();
 
     let rounds = std::cmp::min(ROUND, round_keys.len());
-    println!("Decrypting {} rounds", rounds);
+    println!("Decrypting {rounds} rounds");
 
     let mut r = (rounds as i32) - 1;
     while r >= 0 {
