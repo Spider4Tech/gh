@@ -394,8 +394,8 @@ use crate::SALT_LEN;
         let ciphertext = encrypt3_final(original_data.clone(), &key1, &key2, &round_keys).unwrap();
 
         // Simulate brute force attack on a very small key
-        let mut found = false;
-        let max_attempts = 10; // 255u32.pow(small_key_size as u32);
+        //let mut found = false;
+        let max_attempts = 10; //255u32.pow(small_key_size as u32);
         for i in 0..=max_attempts {
             let candidate_seed = int_to_bytes(i, small_key_size);
             let candidate_key1 = gene3_with_salt(&candidate_seed, &salt);
@@ -403,7 +403,7 @@ use crate::SALT_LEN;
 
             let decrypted = decrypt3_final(ciphertext.clone(), &candidate_key1, &candidate_key2, &round_keys);
             if decrypted.is_ok() && decrypted.unwrap() == original_data {
-                found = true;
+                //found = true;
                 break;
             }
         }
@@ -508,7 +508,7 @@ use crate::SALT_LEN;
         let key1 = gene3_with_salt(seed, &salt);
         let key2 = gene3_with_salt(key1.expose_secret(), &salt);
 
-        let original_data = b"Timing leak resistance test".to_vec();
+
         let mut round_keys = Vec::new();
         for _ in 0..ROUND {
             let mut rnum = [0u8; 8];
