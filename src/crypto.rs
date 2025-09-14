@@ -348,14 +348,14 @@ pub fn build_characters(run_salt: &[u8], round_seed: &[u8; 8]) -> [u8; 256] {
     let mut sbox_key = [0u8; 32];
     let hash = hasher.finalize();
     sbox_key.copy_from_slice(&hash.as_bytes()[..32]);
-    let out = perm256_from_key(&sbox_key);
+    let out = generate_custom_sbox(&sbox_key);
     sbox_key.zeroize();
     out
 }
 
 /// Generates a 256-byte permutation from a 32-byte key
 /// 
-/// Creates a cryptographic permutation by applying multiple rounds of AES S-box
+/// Creates a cryptographic permutation by applying multiple rounds of non-linear
 /// transformations, multiplications, and XOR operations to produce a unique
 /// 256-byte substitution table.
 /// 
@@ -369,31 +369,7 @@ pub fn build_characters(run_salt: &[u8], round_seed: &[u8; 8]) -> [u8; 256] {
 /// 
 /// # Security
 /// 
-/// Uses AES S-boxes and multiple transformation rounds for cryptographic strength.
+/// Uses non-linear polynomial transformations and key-dependent mixing for cryptographic strength.
 pub fn perm256_from_key(key: &[u8; 32]) -> [u8; 256] {
-    let mut out = [0u8; 256];
-    let mut i = 0usize;
-    while i < 256 {
-        let j = (i + (key[5] as usize)) & 0xFF;
-        let mut x = i as u8;
-
-        x = x.wrapping_add(key[0]);
-        x ^= key[1];
-        x = AES_SBOX[x as usize];
-        x = x.wrapping_mul(key[2] | 1);
-
-        x = x.wrapping_add(key[3]);
-        x = AES_SBOX[x as usize];
-        x ^= key[4];
-        x = AES_INV_SBOX[x as usize];
-
-        x = x.wrapping_add(key[6]);
-        x = AES_SBOX[x as usize];
-        x = x.wrapping_mul(key[7] | 1);
-        x = AES_INV_SBOX[x as usize];
-
-        out[j] = x;
-        i += 1;
-    }
-    out
+    generate_custom_sbox(key)
 }
