@@ -50,11 +50,13 @@ use crate::fill_random;
 use crate::SALT_LEN;
 
     use rand::Rng;
+    use crate::crypto::{generate_custom_sbox, generate_inverse_sbox};
     use crate::decrypt3_final;
     use crate::encrypt3_final;
     use crate::gene3_with_salt;
 
     use crate::KEY_LENGTH;
+    use std::time::Instant;
 
     // Test de génération de clés
     #[test]
@@ -560,4 +562,129 @@ use crate::SALT_LEN;
         // Les chiffrés doivent être différents même avec les mêmes round_keys
         assert_ne!(encrypted1, encrypted2, "Ciphertexts must be different even with reused round keys");
     }
+
+    /// Test that the custom S-Box is a valid permutation (bijective)
+    #[test]
+    fn test_custom_sbox_is_bijective() {
+        let key = [0x42u8; 2048]; // Example 2048-byte key
+        let sbox = generate_custom_sbox(&key);
+
+        // Check all values 0..255 are present exactly once
+        let mut found = [false; 256];
+        for &val in &sbox {
+            assert!(!found[val as usize], "Duplicate value {} in S-Box", val);
+            found[val as usize] = true;
+        }
+        assert!(found.iter().all(|&f| f), "S-Box is not bijective");
+    }
+
+    /// Test that small key changes produce very different S-Boxes
+    #[test]
+    fn test_custom_sbox_key_sensitivity() {
+        let key1 = [0x42u8; 2048];
+        let mut key2 = [0x42u8; 2048];
+        key2[0] ^= 0x01; // Flip one bit
+
+        let sbox1 = generate_custom_sbox(&key1);
+        let sbox2 = generate_custom_sbox(&key2);
+
+        // Count differing bytes
+        let diff = sbox1.iter().zip(sbox2.iter()).filter(|(a, b)| a != b).count();
+        assert!(diff > 128, "S-Boxes are too similar for different keys (diff: {})", diff);
+    }
+
+    #[test]
+    fn test_custom_sbox_differential_uniformity() {
+        let key = [0x42u8; 2048];
+        let sbox = generate_custom_sbox(&key);
+
+        // DDT[a][b] = #x such that S(x) ^ S(x ^ a) == b
+        let mut ddt = [[0u16; 256]; 256];
+
+        for a in 1usize..256 {
+            for x in 0usize..256 {
+                let xa = x ^ a;
+                let out = sbox[x] ^ sbox[xa];
+                ddt[a][out as usize] += 1;
+            }
+        }
+
+        // trouver la valeur max sur a != 0 et b quelconque
+        let mut max_entry = 0u16;
+        for a in 1usize..256 {
+            for b in 0usize..256 {
+                if ddt[a][b] > max_entry {
+                    max_entry = ddt[a][b];
+                }
+            }
+        }
+
+        eprintln!("max DDT entry = {}", max_entry);
+        // Seuil : 4 = niveau AES; 8 = permissif.
+        assert!(max_entry <= 4, "DDT maximum trop élevé: {}", max_entry);
+    }
+
+
+    /// Test that the S-Box generation is reasonably fast
+    #[test]
+    fn test_custom_sbox_performance() {
+        let key = [0x42u8; 2048];
+        let start = Instant::now();
+        let _ = generate_custom_sbox(&key);
+        let duration = start.elapsed();
+        assert!(duration < std::time::Duration::from_millis(100), "S-Box generation is too slow: {:?}", duration);
+    }
+
+    /// Test that the inverse S-Box correctly inverts the forward S-Box
+    #[test]
+    fn test_custom_sbox_inverse_correctness() {
+        let key = [0x42u8; 2048];
+        let sbox = generate_custom_sbox(&key);
+        let inv_sbox = generate_inverse_sbox(&sbox);
+
+        // Verify that for all i, inv_sbox[sbox[i]] == i
+        for i in 0..256 {
+            assert_eq!(inv_sbox[sbox[i] as usize], i as u8, "Inverse S-Box is incorrect at index {}", i);
+        }
+    }
+
+    /// Test that the S-Box is resistant to fixed points
+    #[test]
+    fn test_custom_sbox_no_fixed_points() {
+        let key = [0x42u8; 2048];
+        let sbox = generate_custom_sbox(&key);
+
+        // Count fixed points (sbox[i] == i)
+        let fixed_points = sbox.iter().enumerate().filter(|(i, &val)| *i == val as usize).count();
+        assert!(fixed_points < 16, "Too many fixed points in S-Box: {}", fixed_points);
+    }
+
+    /// Test that the S-Box is resistant to linear approximations
+    #[test]
+    fn test_custom_sbox_nonlinearity() {
+        let key = [0x42u8; 2048];
+        let sbox = generate_custom_sbox(&key);
+
+        // Test linear approximation: Pr[a·x + b·S(x) = c] should be close to 0.5 for all a, b, c
+        let mut max_bias = 0.0;
+        for a in 0..8 {
+            for b in 0..8 {
+                for c in 0..2 {
+                    let mut count = 0;
+                    for x in 0..255 {
+                        let condition = ((x >> a) & 1) ^ ((sbox[x as usize] >> b) & 1) ^ c;
+                        if condition == 0 {
+                            count += 1;
+                        }
+                    }
+                    let bias = (count as f64 / 256.0 - 0.5).abs();
+                    if bias > max_bias {
+                        max_bias = bias;
+                    }
+                }
+            }
+        }
+        assert!(max_bias < 0.2, "S-Box has detectable linear approximations (max bias: {})", max_bias);
+    }
+
 }
