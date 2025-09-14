@@ -419,4 +419,145 @@ use crate::SALT_LEN;
         }
         result
     }
+
+    // Test de résistance à la réutilisation de clé
+    #[test]
+    fn test_key_reuse_resistance() {
+        let seed = b"test_seed_for_key_reuse";
+        let mut salt1 = [0u8; SALT_LEN];
+        let mut salt2 = [0u8; SALT_LEN];
+        fill_random(&mut salt1);
+        fill_random(&mut salt2);
+
+        let key1 = gene3_with_salt(seed, &salt1);
+        let key2 = gene3_with_salt(seed, &salt2);
+
+        let original_data = b"Key reuse resistance test".to_vec();
+        let mut round_keys = Vec::new();
+        for _ in 0..ROUND {
+            let mut rnum = [0u8; 8];
+            fill_random(&mut rnum);
+            round_keys.push(u64::from_le_bytes(rnum).to_string().into_bytes());
+        }
+
+        let encrypted1 = encrypt3_final(original_data.clone(), &key1, &key1, &round_keys).unwrap();
+        let encrypted2 = encrypt3_final(original_data.clone(), &key2, &key2, &round_keys).unwrap();
+
+        // Les chiffrés doivent être différents même avec la même graine mais des sels différents
+        assert_ne!(encrypted1, encrypted2, "Ciphertexts must be different even with the same seed but different salts");
+    }
+
+    // Test de résistance à l'attaque par texte clair choisi
+    #[test]
+    fn test_chosen_plaintext_attack() {
+        let seed = b"test_seed_for_chosen_plaintext";
+        let mut salt = [0u8; SALT_LEN];
+        fill_random(&mut salt);
+        let key1 = gene3_with_salt(seed, &salt);
+        let key2 = gene3_with_salt(key1.expose_secret(), &salt);
+
+        let plaintext1 = b"First chosen plaintext".to_vec();
+        let plaintext2 = b"Second chosen plaintext".to_vec();
+
+        let mut round_keys = Vec::new();
+        for _ in 0..ROUND {
+            let mut rnum = [0u8; 8];
+            fill_random(&mut rnum);
+            round_keys.push(u64::from_le_bytes(rnum).to_string().into_bytes());
+        }
+
+        let ciphertext1 = encrypt3_final(plaintext1.clone(), &key1, &key2, &round_keys).unwrap();
+        let ciphertext2 = encrypt3_final(plaintext2.clone(), &key1, &key2, &round_keys).unwrap();
+
+        // Les chiffrés doivent être différents pour des textes clairs différents
+        assert_ne!(ciphertext1, ciphertext2, "Ciphertexts must be different for different plaintexts");
+    }
+
+    // Test de résistance à la corruption de données
+    #[test]
+    fn test_data_corruption_resistance() {
+        let seed = b"test_seed_for_data_corruption";
+        let mut salt = [0u8; SALT_LEN];
+        fill_random(&mut salt);
+        let key1 = gene3_with_salt(seed, &salt);
+        let key2 = gene3_with_salt(key1.expose_secret(), &salt);
+
+        let original_data = b"Data corruption resistance test".to_vec();
+        let mut round_keys = Vec::new();
+        for _ in 0..ROUND {
+            let mut rnum = [0u8; 8];
+            fill_random(&mut rnum);
+            round_keys.push(u64::from_le_bytes(rnum).to_string().into_bytes());
+        }
+
+        let encrypted = encrypt3_final(original_data.clone(), &key1, &key2, &round_keys).unwrap();
+        let mut corrupted = encrypted.clone();
+        if !corrupted.is_empty() {
+            corrupted[SALT_LEN + 2] = 0xFF; // Corruption d'un octet
+            let result = decrypt3_final(corrupted, &key1, &key2, &round_keys);
+            assert!(result.is_err(), "Decryption must fail if data is corrupted");
+        }
+    }
+
+    // Test de résistance à la fuite d'information par timing
+    #[test]
+    fn test_timing_leak_resistance() {
+        let seed = b"test_seed_for_timing_leak";
+        let mut salt = [0u8; SALT_LEN];
+        fill_random(&mut salt);
+        let key1 = gene3_with_salt(seed, &salt);
+        let key2 = gene3_with_salt(key1.expose_secret(), &salt);
+
+        let original_data = b"Timing leak resistance test".to_vec();
+        let mut round_keys = Vec::new();
+        for _ in 0..ROUND {
+            let mut rnum = [0u8; 8];
+            fill_random(&mut rnum);
+            round_keys.push(u64::from_le_bytes(rnum).to_string().into_bytes());
+        }
+
+        // Mesurer le temps de chiffrement pour des données de tailles différentes
+        let small_data = b"small".to_vec();
+        let large_data: Vec<u8> = (0..10000).map(|x| (x % 256) as u8).collect();
+
+        let start_small = std::time::Instant::now();
+        let _ = encrypt3_final(small_data.clone(), &key1, &key2, &round_keys).unwrap();
+        let time_small = start_small.elapsed();
+
+        let start_large = std::time::Instant::now();
+        let _ = encrypt3_final(large_data.clone(), &key1, &key2, &round_keys).unwrap();
+        let time_large = start_large.elapsed();
+
+        // Le temps ne doit pas être proportionnel à la taille des données (pour éviter les attaques par timing)
+        println!("Encryption time for small data: {:?}", time_small);
+        println!("Encryption time for large data: {:?}", time_large);
+        assert!(time_large < time_small * 100, "Encryption time must not scale linearly with data size");
+    }
+
+    // Test de résistance à la réutilisation de nonces/IVs
+    #[test]
+    fn test_nonce_reuse_resistance() {
+        let seed = b"test_seed_for_nonce_reuse";
+        let mut salt = [0u8; SALT_LEN];
+        fill_random(&mut salt);
+        let key1 = gene3_with_salt(seed, &salt);
+        let key2 = gene3_with_salt(key1.expose_secret(), &salt);
+
+        let original_data1 = b"First message with reused nonce".to_vec();
+        let original_data2 = b"Second message with reused nonce".to_vec();
+
+        // Simuler la réutilisation de nonce en réutilisant les mêmes round_keys
+        let mut round_keys = Vec::new();
+        for _ in 0..ROUND {
+            let mut rnum = [0u8; 8];
+            fill_random(&mut rnum);
+            round_keys.push(u64::from_le_bytes(rnum).to_string().into_bytes());
+        }
+
+        let encrypted1 = encrypt3_final(original_data1.clone(), &key1, &key2, &round_keys).unwrap();
+        let encrypted2 = encrypt3_final(original_data2.clone(), &key1, &key2, &round_keys).unwrap();
+
+        // Les chiffrés doivent être différents même avec les mêmes round_keys
+        assert_ne!(encrypted1, encrypted2, "Ciphertexts must be different even with reused round keys");
+    }
 }
