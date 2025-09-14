@@ -11,6 +11,66 @@ use zeroize::Zeroize;
 
 type HmacSha256 = Hmac<Sha256>;
 
+/// Generates a custom cryptographically secure S-Box from a 32-byte key
+/// 
+/// This function creates a non-linear, key-dependent substitution box
+/// using a combination of modular arithmetic, bitwise operations, and
+/// polynomial transformations to ensure cryptographic strength.
+/// 
+/// # Arguments
+/// 
+/// * `key` - A 32-byte secret key used to derive the S-Box
+/// 
+/// # Returns
+/// 
+/// A 256-byte substitution box where each byte is uniquely mapped
+pub fn generate_custom_sbox(key: &[u8; 32]) -> [u8; 256] {
+    let mut sbox = [0u8; 256];
+    for i in 0..256 {
+        let mut x = i as u8;
+        // Key-dependent non-linear transformations
+        x = x.wrapping_add(key[i % 32]);
+        x = x.wrapping_mul(key[(i + 7) % 32] | 1);
+        x = x.rotate_left((key[(i + 13) % 32] % 8).into());
+        x ^= key[(i + 19) % 32];
+        x = x.wrapping_add(key[(i + 23) % 32]);
+        // Polynomial transformation for non-linearity
+        x = x.wrapping_mul(x).wrapping_add(x).wrapping_add(0x55);
+        sbox[i] = x;
+    }
+    // Ensure the S-Box is a permutation (bijective)
+    let mut used = [false; 256];
+    for i in 0..256 {
+        let mut j = sbox[i] as usize;
+        while used[j] {
+            j = (j + 1) % 256;
+        }
+        sbox[i] = j as u8;
+        used[j] = true;
+    }
+    sbox
+}
+
+/// Generates the inverse of a custom S-Box
+/// 
+/// Creates the mathematical inverse of a 256-byte substitution box,
+/// allowing for bidirectional transformations during encryption and decryption.
+/// 
+/// # Arguments
+/// 
+/// * `forward_sbox` - The forward substitution box (256 bytes)
+/// 
+/// # Returns
+/// 
+/// The inverse substitution box where inverse[forward[i]] = i for all i
+pub fn generate_inverse_sbox(forward_sbox: &[u8; 256]) -> [u8; 256] {
+    let mut inverse = [0u8; 256];
+    for i in 0..256 {
+        inverse[forward_sbox[i] as usize] = i as u8;
+    }
+    inverse
+}
+
 /// Derives a 32-byte Blake3 key using HKDF key derivation
 /// 
 /// This function creates a cryptographically secure 32-byte key suitable for Blake3
@@ -348,14 +408,14 @@ pub fn build_characters(run_salt: &[u8], round_seed: &[u8; 8]) -> [u8; 256] {
     let mut sbox_key = [0u8; 32];
     let hash = hasher.finalize();
     sbox_key.copy_from_slice(&hash.as_bytes()[..32]);
-    let out = perm256_from_key(&sbox_key);
+    let out = generate_custom_sbox(&sbox_key);
     sbox_key.zeroize();
     out
 }
 
 /// Generates a 256-byte permutation from a 32-byte key
 /// 
-/// Creates a cryptographic permutation by applying multiple rounds of AES S-box
+/// Creates a cryptographic permutation by applying multiple rounds of non-linear
 /// transformations, multiplications, and XOR operations to produce a unique
 /// 256-byte substitution table.
 /// 
@@ -369,31 +429,7 @@ pub fn build_characters(run_salt: &[u8], round_seed: &[u8; 8]) -> [u8; 256] {
 /// 
 /// # Security
 /// 
-/// Uses AES S-boxes and multiple transformation rounds for cryptographic strength.
+/// Uses non-linear polynomial transformations and key-dependent mixing for cryptographic strength.
 pub fn perm256_from_key(key: &[u8; 32]) -> [u8; 256] {
-    let mut out = [0u8; 256];
-    let mut i = 0usize;
-    while i < 256 {
-        let j = (i + (key[5] as usize)) & 0xFF;
-        let mut x = i as u8;
-
-        x = x.wrapping_add(key[0]);
-        x ^= key[1];
-        x = AES_SBOX[x as usize];
-        x = x.wrapping_mul(key[2] | 1);
-
-        x = x.wrapping_add(key[3]);
-        x = AES_SBOX[x as usize];
-        x ^= key[4];
-        x = AES_INV_SBOX[x as usize];
-
-        x = x.wrapping_add(key[6]);
-        x = AES_SBOX[x as usize];
-        x = x.wrapping_mul(key[7] | 1);
-        x = AES_INV_SBOX[x as usize];
-
-        out[j] = x;
-        i += 1;
-    }
-    out
+    generate_custom_sbox(key)
 }

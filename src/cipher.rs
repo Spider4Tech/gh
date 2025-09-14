@@ -182,7 +182,7 @@ pub fn generate_row_direct(salt: &[u8], seed: u64, table_2d: usize, row: usize) 
     let mut transform_key = [0u8; 32];
     hk.expand(b"sbox_key_v1", &mut transform_key)
         .expect("hkdf sbox key");
-    let sbox = perm256_from_key(&transform_key);
+    let sbox = generate_custom_sbox(&transform_key);
     transform_key.zeroize();
     sbox
 }
