@@ -120,73 +120,84 @@ pub fn insert_random_stars_escaped_secure(word: Vec<u8>, key: &[u8]) -> Vec<u8> 
     if word.is_empty() {
         return word;
     }
+
+    // 1. Escape zero bytes (unchanged, already optimized)
     let escaped = escape_zero_bytes(word);
+    let lene = escaped.clone().len();
+    if escaped.is_empty() {
+        return escaped;
+    }
 
-    let mut fresh_nonce = [0u8; 16];
-    fill_random(&mut fresh_nonce);
+    // 2. Generate padding parameters in one go
+    let mut padding_params = [0u8; 48]; // 16 (nonce) + 32 (padding_key)
+    fill_random(&mut padding_params);
+    let (fresh_nonce, _padding_key) = padding_params.split_at_mut(16);
 
-    let mut ikm = Vec::with_capacity(key.len() + fresh_nonce.len());
+    // Derive padding key (unchanged for security)
+    let mut ikm = Vec::with_capacity(key.len() + 16);
     ikm.extend_from_slice(key);
-    ikm.extend_from_slice(&fresh_nonce);
-
+    ikm.extend_from_slice(fresh_nonce);
     let hk = Hkdf::<Sha256>::new(None, &ikm);
-    let mut padding_key = [0u8; 32];
-    hk.expand(b"padding_secure_v2", &mut padding_key).expect("hkdf padding");
-
+    let mut derived_padding_key = [0u8; 32];
+    hk.expand(b"padding_secure_v2", &mut derived_padding_key)
+        .expect("hkdf padding");
     ikm.zeroize();
-    fresh_nonce.zeroize();
 
-    let min = (escaped.len() / 3) as u64;
-    let max = (escaped.len() * 2) as u64;
-    let range = if max > min { max - min + 1 } else { 1 };
-    let stars_seed = u64::from_le_bytes([
-        padding_key[0], padding_key[1], padding_key[2], padding_key[3],
-        padding_key[4], padding_key[5], padding_key[6], padding_key[7],
-    ]);
-    let num_stars = (min + (stars_seed % range)) as usize;
+    // 3. Calculate number of stars (simplified logic)
+    let min_stars = escaped.len() / 3;
+    let max_stars = (escaped.len() * 2).min(escaped.len() + 65536); // Cap to prevent excessive padding
+    let stars_seed = u64::from_le_bytes(derived_padding_key[0..8].try_into().unwrap());
+    let num_stars = min_stars + (stars_seed as usize % (max_stars - min_stars + 1));
 
-    let mut positions: Vec<usize> = Vec::with_capacity(num_stars);
-    let mut t = 0usize;
+    // 4. Generate positions in bulk (optimized)
+    let mut positions = vec![0usize; num_stars];
+    let mut t = 0;
     while t < num_stars {
-        let pos_seed = u64::from_le_bytes([
-            padding_key[(t * 8) % 32], padding_key[(t * 8 + 1) % 32],
-            padding_key[(t * 8 + 2) % 32], padding_key[(t * 8 + 3) % 32],
-            padding_key[(t * 8 + 4) % 32], padding_key[(t * 8 + 5) % 32],
-            padding_key[(t * 8 + 6) % 32], padding_key[(t * 8 + 7) % 32],
-        ]) ^ (t as u64);
-        let pos = (pos_seed as usize) % (escaped.len() + 1);
-        positions.push(pos);
+        let pos_seed = u64::from_le_bytes(derived_padding_key[(t % 4)..][..8].try_into().unwrap())
+            .wrapping_add(t as u64)
+            .wrapping_add(stars_seed);
+        positions[t] = (pos_seed as usize) % (escaped.len() + 1);
         t += 1;
     }
     positions.sort_unstable();
 
-    let output_len = escaped.len() + (num_stars * 2);
-    let mut result = Vec::with_capacity(output_len);
+    // 5. Pre-allocate result buffer
+    let mut result = Vec::with_capacity(escaped.len() + num_stars * 2);
+
+    // 6. Insert stars and data in a single pass (optimized)
     let mut escaped_idx = 0;
     let mut pos_idx = 0;
     let mut current_pos = 0;
+    let mut escaped_iter = escaped.into_iter();
+    let star_pair = [0u8; 2]; // Pre-allocated star pair
 
-    while escaped_idx < escaped.len() || pos_idx < positions.len() {
-        while pos_idx < positions.len() && positions[pos_idx] == current_pos {
-            result.push(0u8);
-            result.push(0u8);
+    while escaped_idx < lene || pos_idx < num_stars {
+        // Insert stars if needed
+        while pos_idx < num_stars && positions[pos_idx] == current_pos {
+            result.extend_from_slice(&star_pair);
             pos_idx += 1;
         }
 
-        if escaped_idx < escaped.len() {
-            result.push(escaped[escaped_idx]);
+        // Insert escaped data if available
+        if let Some(byte) = escaped_iter.next() {
+            result.push(byte);
             escaped_idx += 1;
         }
 
         current_pos += 1;
     }
 
-    while pos_idx < positions.len() {
-        result.push(0u8);
-        result.push(0u8);
+    // Insert remaining stars
+    while pos_idx < num_stars {
+        result.extend_from_slice(&star_pair);
         pos_idx += 1;
     }
 
-    padding_key.zeroize();
+    // Zeroize sensitive data
+    derived_padding_key.zeroize();
+    padding_params.zeroize();
+
     result
 }
+
+

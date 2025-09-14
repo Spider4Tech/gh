@@ -13,7 +13,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let start_all = Instant::now();
 
-    let original_data = vec![b'A'; 512 * 512];
+    let original_data = vec![b'A'; 1024 * 1024 * 100 ];
     println!("Original data size: {} bytes", original_data.len());
 
     let seed = b"horizon_test_seed_2025";

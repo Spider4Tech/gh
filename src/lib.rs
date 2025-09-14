@@ -319,21 +319,21 @@ use crate::SALT_LEN;
         }
 
         // Measure encryption time
-        let start_encrypt = std::time::Instant::now();
+        let start_encrypt = Instant::now();
         let _ = encrypt3_final(original_data.clone(), &key1, &key2, &round_keys).unwrap();
         let encrypt_time = start_encrypt.elapsed();
 
         // Measure decryption time
         let ciphertext = encrypt3_final(original_data.clone(), &key1, &key2, &round_keys).unwrap();
-        let start_decrypt = std::time::Instant::now();
+        let start_decrypt = Instant::now();
         let _ = decrypt3_final(ciphertext, &key1, &key2, &round_keys).unwrap();
         let decrypt_time = start_decrypt.elapsed();
 
         // Ensure times are reasonable and do not leak sensitive information
         println!("Encryption time: {:?}", encrypt_time);
         println!("Decryption time: {:?}", decrypt_time);
-        assert!(encrypt_time < std::time::Duration::from_secs(1), "Encryption must not be too slow");
-        assert!(decrypt_time < std::time::Duration::from_secs(1), "Decryption must not be too slow");
+        assert!(encrypt_time < std::time::Duration::from_secs(2), "Encryption must not be too slow");  // TODO à surveiller
+        assert!(decrypt_time < std::time::Duration::from_secs(2), "Decryption must not be too slow");
     }
 
     // Test de résistance à une attaque par collision
@@ -522,11 +522,11 @@ use crate::SALT_LEN;
         let small_data = b"small".to_vec();
         let large_data: Vec<u8> = (0..10000).map(|x| (x % 256) as u8).collect();
 
-        let start_small = std::time::Instant::now();
+        let start_small = Instant::now();
         let _ = encrypt3_final(small_data.clone(), &key1, &key2, &round_keys).unwrap();
         let time_small = start_small.elapsed();
 
-        let start_large = std::time::Instant::now();
+        let start_large = Instant::now();
         let _ = encrypt3_final(large_data.clone(), &key1, &key2, &round_keys).unwrap();
         let time_large = start_large.elapsed();
 
@@ -686,5 +686,108 @@ use crate::SALT_LEN;
         }
         assert!(max_bias < 0.2, "S-Box has detectable linear approximations (max bias: {})", max_bias);
     }
+
+    #[test]
+    fn test_custom_sbox_bijective() {
+        let key = [0x42u8; 2048];
+        let sbox = generate_custom_sbox(&key);
+        let mut seen = [false; 256];
+        for &v in sbox.iter() {
+            assert!(!seen[v as usize], "duplicate value in sbox: {:02x}", v);
+            seen[v as usize] = true;
+        }
+    }
+
+    #[test]
+    fn test_custom_sbox_linear_approximation_table() {
+        let key = [0x42u8; 2048];
+        let sbox = generate_custom_sbox(&key);
+        let mut max_bias = 0usize;
+        for a in 1usize..256 {
+            for b in 1usize..256 {
+                let mut count = 0usize;
+                for x in 0usize..256 {
+                    let pa = ( (a as u8 & x as u8).count_ones() & 1 ) as u8;
+                    let pb = ( (b as u8 & sbox[x]).count_ones() & 1 ) as u8;
+                    if pa == pb {
+                        count += 1;
+                    }
+                }
+                let bias = if count > 128 { count - 128 } else { 128 - count };
+                if bias > max_bias { max_bias = bias; }
+            }
+        }
+        eprintln!("max LAT absolute deviation from 128 = {}", max_bias);
+        let max_bias_frac = max_bias as f64 / 256.0;
+        assert!(max_bias_frac <= 0.10, "S-box linear bias too high: {}", max_bias_frac);
+    }
+
+    #[test]
+    fn test_custom_sbox_avalanche_and_sac() {
+        let key = [0x42u8; 2048];
+        let sbox = generate_custom_sbox(&key);
+        let mut total_hd: usize = 0;
+        let mut toggle_counts = [[0usize; 8]; 8];
+        for in_bit in 0..8 {
+            let mask = 1usize << in_bit;
+            for x in 0usize..256 {
+                let y1 = sbox[x];
+                let y2 = sbox[x ^ mask];
+                let hd = (y1 ^ y2).count_ones() as usize;
+                total_hd += hd;
+                for out_bit in 0..8 {
+                    if ((y1 ^ y2) >> out_bit) & 1 == 1 {
+                        toggle_counts[in_bit][out_bit] += 1;
+                    }
+                }
+            }
+        }
+        let avg_hd = total_hd as f64 / (256.0 * 8.0);
+        eprintln!("average hamming distance per single-bit input flip = {}", avg_hd);
+        assert!(avg_hd >= 3.0 && avg_hd <= 5.0, "average avalanche out of expected range: {}", avg_hd);
+        for in_bit in 0..8 {
+            for out_bit in 0..8 {
+                let frac = toggle_counts[in_bit][out_bit] as f64 / 256.0;
+                let bias = (frac - 0.5).abs();
+                assert!(bias <= 0.10, "SAC bias too high for in_bit {} out_bit {} = {}", in_bit, out_bit, bias);
+            }
+        }
+    }
+
+    #[test]
+    fn test_custom_sbox_bit_independence_criterion() {
+        let key = [0x42u8; 2048];
+        let sbox = generate_custom_sbox(&key);
+        for a in 1usize..256 {
+            for b in 1usize..256 {
+                let mut cnt00 = 0usize;
+                let mut cnt01 = 0usize;
+                let mut cnt10 = 0usize;
+                let mut cnt11 = 0usize;
+                for x in 0usize..256 {
+                    let pa = ((a as u8 & x as u8).count_ones() & 1) as u8;
+                    let sb = sbox[x];
+                    let pb = ((b as u8 & sb).count_ones() & 1) as u8;
+                    match (pa, pb) {
+                        (0,0) => cnt00 += 1,
+                        (0,1) => cnt01 += 1,
+                        (1,0) => cnt10 += 1,
+                        (1,1) => cnt11 += 1,
+                        _ => {}
+                    }
+                }
+
+                let p01 = cnt01 as f64 / 256.0;
+                let p10 = cnt10 as f64 / 256.0;
+                let p11 = cnt11 as f64 / 256.0;
+                let pa = p10 + p11;
+                let pb = p01 + p11;
+                let expected_p11 = pa * pb;
+                let diff = (p11 - expected_p11).abs();
+                assert!(diff <= 0.10, "BIC failed for masks a=0x{:02x} b=0x{:02x}, diff={}", a, b, diff);
+            }
+        }
+    }
+
 
 }

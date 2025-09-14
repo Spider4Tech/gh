@@ -86,7 +86,9 @@ pub fn generate_custom_sbox(key: &[u8]) -> [u8; 256] {
         }
         if collision {
             // fallback to AES SBOX (bijective)
-            for i in 0..256 { sbox[i] = AES_SBOX[i]; }
+            for _ in 0..256 {
+                sbox.copy_from_slice(&AES_SBOX);
+            }
         }
     }
 
@@ -170,7 +172,7 @@ pub fn blake3_stream_for_chunk(
 ) {
     let key32 = derive_blake3_key32(xor_key, salt, context);
 
-    let mut hasher = blake3::Hasher::new_keyed(&key32);
+    let mut hasher = Hasher::new_keyed(&key32);
     hasher.update(context);
     hasher.update(&chunk_index.to_be_bytes());
 
