@@ -24,7 +24,7 @@ type HmacSha256 = Hmac<Sha256>;
 /// # Returns
 /// 
 /// A 256-byte substitution box where each byte is uniquely mapped
-pub fn generate_custom_sbox(key: &[u8; 32]) -> [u8; 256] {
+pub fn generate_custom_sbox(key: &[u8; 2048]) -> [u8; 256] {
     let mut sbox = [0u8; 256];
     for i in 0..256 {
         let mut x = i as u8;
@@ -405,13 +405,14 @@ pub fn build_characters(run_salt: &[u8], round_seed: &[u8; 8]) -> [u8; 256] {
     hasher.update(run_salt);
     hasher.update(round_seed);
     hasher.update(b"chars_sbox_v1");
-    let mut sbox_key = [0u8; 32];
-    let hash = hasher.finalize();
-    sbox_key.copy_from_slice(&hash.as_bytes()[..32]);
-    let out = generate_custom_sbox(&sbox_key);
+    let mut sbox_key = [0u8; 2048];
+    let mut reader = hasher.finalize_xof();
+    reader.fill(&mut sbox_key); // Remplit les 2048 octets
+    let out = generate_custom_sbox(&sbox_key); // Utilise les 32 premiers octets pour la S-Box
     sbox_key.zeroize();
     out
 }
+
 
 /// Generates a 256-byte permutation from a 32-byte key
 /// 
@@ -430,6 +431,6 @@ pub fn build_characters(run_salt: &[u8], round_seed: &[u8; 8]) -> [u8; 256] {
 /// # Security
 /// 
 /// Uses non-linear polynomial transformations and key-dependent mixing for cryptographic strength.
-pub fn perm256_from_key(key: &[u8; 32]) -> [u8; 256] {
+pub fn perm256_from_key(key: &[u8; 2048]) -> [u8; 256] {
     generate_custom_sbox(key)
 }

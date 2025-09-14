@@ -179,7 +179,7 @@ pub fn generate_row_direct(salt: &[u8], seed: u64, table_2d: usize, row: usize) 
     ikm[8..16].copy_from_slice(&(table_2d as u64).to_le_bytes());
     ikm[16..24].copy_from_slice(&(row as u64).to_le_bytes());
     let hk = hkdf::Hkdf::<sha2::Sha256>::new(Some(salt), &ikm);
-    let mut transform_key = [0u8; 32];
+    let mut transform_key = [0u8; 2048];
     hk.expand(b"sbox_key_v1", &mut transform_key)
         .expect("hkdf sbox key");
     let sbox = generate_custom_sbox(&transform_key);
