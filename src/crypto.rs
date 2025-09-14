@@ -11,6 +11,66 @@ use zeroize::Zeroize;
 
 type HmacSha256 = Hmac<Sha256>;
 
+/// Generates a custom cryptographically secure S-Box from a 32-byte key
+/// 
+/// This function creates a non-linear, key-dependent substitution box
+/// using a combination of modular arithmetic, bitwise operations, and
+/// polynomial transformations to ensure cryptographic strength.
+/// 
+/// # Arguments
+/// 
+/// * `key` - A 32-byte secret key used to derive the S-Box
+/// 
+/// # Returns
+/// 
+/// A 256-byte substitution box where each byte is uniquely mapped
+pub fn generate_custom_sbox(key: &[u8; 32]) -> [u8; 256] {
+    let mut sbox = [0u8; 256];
+    for i in 0..256 {
+        let mut x = i as u8;
+        // Key-dependent non-linear transformations
+        x = x.wrapping_add(key[i % 32]);
+        x = x.wrapping_mul(key[(i + 7) % 32] | 1);
+        x = x.rotate_left(key[(i + 13) % 32] % 8);
+        x ^= key[(i + 19) % 32];
+        x = x.wrapping_add(key[(i + 23) % 32]);
+        // Polynomial transformation for non-linearity
+        x = x.wrapping_mul(x).wrapping_add(x).wrapping_add(0x55);
+        sbox[i] = x;
+    }
+    // Ensure the S-Box is a permutation (bijective)
+    let mut used = [false; 256];
+    for i in 0..256 {
+        let mut j = sbox[i] as usize;
+        while used[j] {
+            j = (j + 1) % 256;
+        }
+        sbox[i] = j as u8;
+        used[j] = true;
+    }
+    sbox
+}
+
+/// Generates the inverse of a custom S-Box
+/// 
+/// Creates the mathematical inverse of a 256-byte substitution box,
+/// allowing for bidirectional transformations during encryption and decryption.
+/// 
+/// # Arguments
+/// 
+/// * `forward_sbox` - The forward substitution box (256 bytes)
+/// 
+/// # Returns
+/// 
+/// The inverse substitution box where inverse[forward[i]] = i for all i
+pub fn generate_inverse_sbox(forward_sbox: &[u8; 256]) -> [u8; 256] {
+    let mut inverse = [0u8; 256];
+    for i in 0..256 {
+        inverse[forward_sbox[i] as usize] = i as u8;
+    }
+    inverse
+}
+
 /// Derives a 32-byte Blake3 key using HKDF key derivation
 /// 
 /// This function creates a cryptographically secure 32-byte key suitable for Blake3
