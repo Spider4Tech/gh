@@ -31,7 +31,7 @@ pub fn generate_custom_sbox(key: &[u8; 32]) -> [u8; 256] {
         // Key-dependent non-linear transformations
         x = x.wrapping_add(key[i % 32]);
         x = x.wrapping_mul(key[(i + 7) % 32] | 1);
-        x = x.rotate_left(key[(i + 13) % 32] % 8);
+        x = x.rotate_left((key[(i + 13) % 32] % 8).into());
         x ^= key[(i + 19) % 32];
         x = x.wrapping_add(key[(i + 23) % 32]);
         // Polynomial transformation for non-linearity
