@@ -3,7 +3,7 @@ use once_cell::sync::Lazy;
 use zeroize::Zeroize;
 
 /// Length of cryptographic keys in bytes
-pub const KEY_LENGTH: usize = 1024;
+pub const KEY_LENGTH: usize = 512;
 
 /// Length of salt values in bytes
 pub const SALT_LEN: usize = 32;
