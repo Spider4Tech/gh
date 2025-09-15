@@ -298,7 +298,7 @@ pub fn unshift_bits_with_rot_key_par(mut buf: Vec<u8>, rot_key: &[u8]) -> Vec<u8
 /// eliminate redundant table generation.
 #[inline]
 pub fn build_pairs(key1_chars: &[u8], key2_chars: &[u8], len: usize) -> Vec<(u16, u16)> {
-    let mut v = Vec::with_capacity(len.min(65536));
+    let mut v = Vec::with_capacity(len.min(8192));
     let mut i = 0usize;
     while i < len {
         let table_2d = key1_chars[i % key1_chars.len()] as u16;
