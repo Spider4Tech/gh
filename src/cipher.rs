@@ -26,7 +26,7 @@ use zeroize::Zeroize;
 /// This implementation prevents timing side-channel attacks by processing
 /// the table in fixed-size chunks and using bitwise masks rather than
 /// conditional branching.
-#[inline]
+#[inline(always)]
 pub fn constant_time_lookup_256(table: &[u8; 256], index: u8) -> u8 {
     let mut result = 0u8;
     let idx = index as usize;
@@ -120,7 +120,7 @@ pub fn constant_time_position_lookup(positions: &[usize; 256], value: u8) -> usi
 /// 
 /// Processes the entire character array in chunks to ensure constant execution
 /// time regardless of the target index value.
-#[inline]
+#[inline(always)]
 pub fn constant_time_character_lookup(characters: &[u8; 256], index: usize) -> u8 {
     let mut result = 0u8;
 
@@ -165,6 +165,7 @@ pub fn constant_time_character_lookup(characters: &[u8; 256], index: usize) -> u
 /// 
 /// The input table must be a valid permutation (each value 0-255 appears exactly once)
 /// for the inverse to be mathematically correct.
+#[inline(always)]
 pub fn build_inverse_lookup(forward_row: &[u8; 256]) -> [u8; 256] {
     let mut inverse = [0u8; 256];
     let mut i = 0usize;
@@ -296,12 +297,12 @@ pub fn unshift_bits_with_rot_key_par(mut buf: Vec<u8>, rot_key: &[u8]) -> Vec<u8
 /// The result is sorted and deduplicated to minimize cache size and
 /// eliminate redundant table generation.
 #[inline]
-pub fn build_pairs(key1_chars: &[usize], key2_chars: &[usize], len: usize) -> Vec<(u16, u16)> {
+pub fn build_pairs(key1_chars: &[u8], key2_chars: &[u8], len: usize) -> Vec<(u16, u16)> {
     let mut v = Vec::with_capacity(len.min(65536));
     let mut i = 0usize;
     while i < len {
-        let table_2d = (key1_chars[i % key1_chars.len()] & 0xFF) as u16;
-        let row = (key2_chars[i % key2_chars.len()] & 0xFF) as u16;
+        let table_2d = key1_chars[i % key1_chars.len()] as u16;
+        let row = key2_chars[i % key2_chars.len()] as u16;
         v.push((table_2d, row));
         i += 1;
     }
@@ -410,14 +411,14 @@ pub fn build_cipher_cache(
         || {
             k1_ref
                 .par_iter()
-                .map(|&c| (c as usize) & 0xFF)
-                .collect::<Vec<_>>()
+                .map(|&c| c & 0xFF)
+                .collect::<Vec<u8>>()
         },
         || {
             k2_ref
                 .par_iter()
-                .map(|&c| (c as usize) & 0xFF)
-                .collect::<Vec<_>>()
+                .map(|&c| c & 0xFF)
+                .collect::<Vec<u8>>()
         },
     );
 
@@ -493,29 +494,33 @@ pub fn encrypt_core_optimized(
         if keystream.len() != this { keystream.resize(this, 0); }
         blake3_stream_for_chunk(xor_key, Some(run_salt), b"xor_stream_v1", chunk_index, &mut keystream);
 
-        {
-            let src = &plain_text[offset..offset + this];
-            let dst = &mut cipher_text[offset..offset + this];
+        // Process the chunk in parallel with explicit chunk-local variables
+        let k1 = &cache.key1_chars;
+        let k2 = &cache.key2_chars;
+        let rows = &cache.rows;
+        let index_map = &cache.index_map;
 
-            dst.par_iter_mut()
-                .zip(src.par_iter())
-                .zip(keystream.par_iter())
-                .enumerate()
-                .for_each(|(i, ((d, &s), &k))| {
-                    let pos = offset + i;
-                    let table_2d = cache.key1_chars[pos % cache.key1_chars.len()] & 0xFF;
-                    let row = cache.key2_chars[pos % cache.key2_chars.len()] & 0xFF;
-                    let map_index = (table_2d << 8) | row;
+        let src = &plain_text[offset..offset + this];
+        let dst = &mut cipher_text[offset..offset + this];
 
-                    let row_idx = cache.index_map[map_index];
-                    if row_idx != usize::MAX {
-                        let transformed = constant_time_lookup_256(&cache.rows[row_idx], s);
-                        *d = transformed ^ k;
-                    } else {
-                        *d = s ^ k;
-                    }
-                });
-        }
+        dst.par_iter_mut()
+            .zip(src.par_iter())
+            .zip(keystream.par_iter())
+            .enumerate()
+            .for_each(|(i, ((d, &s), &k))| {
+                let pos = offset + i;
+                let table_2d = k1[pos % k1.len()] as usize;
+                let row = k2[pos % k2.len()] as usize;
+                let map_index = (table_2d << 8) | row;
+
+                let row_idx = index_map[map_index];
+                if row_idx != usize::MAX {
+                    let transformed = constant_time_lookup_256(&rows[row_idx], s);
+                    *d = transformed ^ k;
+                } else {
+                    *d = s ^ k;
+                }
+            });
 
         offset += this;
         chunk_index = chunk_index.wrapping_add(1);
@@ -570,30 +575,33 @@ pub fn decrypt_core_optimized(
         if keystream.len() != this { keystream.resize(this, 0); }
         blake3_stream_for_chunk(xor_key, Some(run_salt), b"xor_stream_v1", chunk_index, &mut keystream);
 
-        {
-            let src = &cipher_text[offset..offset + this];
-            let dst = &mut plain_text[offset..offset + this];
+        // Process the chunk in parallel with explicit chunk-local variables
+        let k1 = &cache.key1_chars;
+        let k2 = &cache.key2_chars;
+        let inv_rows = &cache.inverse_rows;
+        let index_map = &cache.index_map;
 
-            dst.par_iter_mut()
-                .zip(src.par_iter())
-                .zip(keystream.par_iter())
-                .enumerate()
-                .for_each(|(i, ((d, &s), &k))| {
-                    let pos = offset + i;
-                    let table_2d = cache.key1_chars[pos % cache.key1_chars.len()] & 0xFF;
-                    let row = cache.key2_chars[pos % cache.key2_chars.len()] & 0xFF;
-                    let map_index = (table_2d << 8) | row;
+        let src = &cipher_text[offset..offset + this];
+        let dst = &mut plain_text[offset..offset + this];
 
-                    let xor_result = s ^ k;
+        dst.par_iter_mut()
+            .zip(src.par_iter())
+            .zip(keystream.par_iter())
+            .enumerate()
+            .for_each(|(i, ((d, &s), &k))| {
+                let pos = offset + i;
+                let table_2d = k1[pos % k1.len()] as usize;
+                let row = k2[pos % k2.len()] as usize;
+                let map_index = (table_2d << 8) | row;
 
-                    let row_idx = cache.index_map[map_index];
-                    if row_idx != usize::MAX {
-                        *d = constant_time_lookup_256(&cache.inverse_rows[row_idx], xor_result);
-                    } else {
-                        *d = xor_result;
-                    }
-                });
-        }
+                let xor_result = s ^ k;
+                let row_idx = index_map[map_index];
+                if row_idx != usize::MAX {
+                    *d = constant_time_lookup_256(&inv_rows[row_idx], xor_result);
+                } else {
+                    *d = xor_result;
+                }
+            });
 
         offset += this;
         chunk_index = chunk_index.wrapping_add(1);
@@ -644,12 +652,15 @@ pub fn encrypt3_final(
     header.push(VERSION);
     header.push(ALG_ID);
 
+    // Compute HMAC and write output with a single allocation
     let hmac_tag = compute_hmac(&hmac_key, &header, &body);
-
     let mut output = Vec::with_capacity(header.len() + body.len() + hmac_tag.len());
-    output.extend_from_slice(&header);
-    output.extend_from_slice(&body);
-    output.extend_from_slice(&hmac_tag);
+    unsafe { output.set_len(output.capacity()); }
+    let (mut o1, rest) = output.split_at_mut(header.len());
+    o1.copy_from_slice(&header);
+    let (mut o2, mut o3) = rest.split_at_mut(body.len());
+    o2.copy_from_slice(&body);
+    o3.copy_from_slice(&hmac_tag);
 
     Ok(output)
 }
