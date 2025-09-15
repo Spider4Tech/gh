@@ -46,8 +46,8 @@ mod tests {
     }
 
     use crate::ROUND;
-use crate::fill_random;
-use crate::SALT_LEN;
+    use crate::fill_random;
+    use crate::SALT_LEN;
 
     use rand::Rng;
     use crate::crypto::{generate_custom_sbox, generate_inverse_sbox};
@@ -789,5 +789,213 @@ use crate::SALT_LEN;
         }
     }
 
+    // ------------------------ Additional real-world style tests ------------------------
+
+    #[test]
+    fn test_header_version_algid_validation() {
+        let seed = b"hdr_validation";
+        let mut salt = [0u8; SALT_LEN];
+        fill_random(&mut salt);
+        let key1 = gene3_with_salt(seed, &salt);
+        let key2 = gene3_with_salt(key1.expose_secret(), &salt);
+        let data = b"header check".to_vec();
+
+        let mut round_keys = Vec::new();
+        for _ in 0..ROUND {
+            let mut r = [0u8; 8]; fill_random(&mut r);
+            round_keys.push(u64::from_le_bytes(r).to_string().into_bytes());
+        }
+
+        let encrypted = encrypt3_final(data, &key1, &key2, &round_keys).unwrap();
+
+        // Flip version
+        let mut bad_v = encrypted.clone();
+        bad_v[SALT_LEN] ^= 0x01;
+        assert!(decrypt3_final(bad_v, &key1, &key2, &round_keys).is_err());
+
+        // Flip ALG_ID
+        let mut bad_a = encrypted.clone();
+        bad_a[SALT_LEN + 1] ^= 0x01;
+        assert!(decrypt3_final(bad_a, &key1, &key2, &round_keys).is_err());
+    }
+
+    #[test]
+    fn test_round_key_edge_counts() {
+        let seed = b"round_edges";
+        let mut salt = [0u8; SALT_LEN];
+        fill_random(&mut salt);
+        let key1 = gene3_with_salt(seed, &salt);
+        let key2 = gene3_with_salt(key1.expose_secret(), &salt);
+        let data = b"edge rounds data".to_vec();
+
+        let try_counts = [0usize, 1, 2, ROUND, ROUND + 2];
+        for &cnt in &try_counts {
+            let mut round_keys = Vec::new();
+            for _ in 0..cnt {
+                let mut r = [0u8; 8]; fill_random(&mut r);
+                round_keys.push(u64::from_le_bytes(r).to_string().into_bytes());
+            }
+            let enc = encrypt3_final(data.clone(), &key1, &key2, &round_keys).unwrap();
+            let dec = decrypt3_final(enc, &key1, &key2, &round_keys).unwrap();
+            assert_eq!(dec, data);
+        }
+    }
+
+    #[test]
+    fn test_chunk_boundary_lengths_roundtrip() {
+        use crate::types::BLAKE3_KEYSTREAM_CHUNK;
+        let seed = b"chunk_boundaries";
+        let mut salt = [0u8; SALT_LEN];
+        fill_random(&mut salt);
+        let key1 = gene3_with_salt(seed, &salt);
+        let key2 = gene3_with_salt(key1.expose_secret(), &salt);
+
+        let lengths = [
+            0usize,
+            1,
+            BLAKE3_KEYSTREAM_CHUNK - 1,
+            BLAKE3_KEYSTREAM_CHUNK,
+            BLAKE3_KEYSTREAM_CHUNK + 1,
+            2 * BLAKE3_KEYSTREAM_CHUNK,
+            2 * BLAKE3_KEYSTREAM_CHUNK + 3,
+        ];
+
+        let mut round_keys = Vec::new();
+        for _ in 0..ROUND {
+            let mut r = [0u8; 8]; fill_random(&mut r);
+            round_keys.push(u64::from_le_bytes(r).to_string().into_bytes());
+        }
+
+        for &len in &lengths {
+            let data: Vec<u8> = (0..len).map(|i| (i as u8).wrapping_mul(31).wrapping_add(7)).collect();
+            let enc = encrypt3_final(data.clone(), &key1, &key2, &round_keys).unwrap();
+            let dec = decrypt3_final(enc, &key1, &key2, &round_keys).unwrap();
+            assert_eq!(dec, data, "Mismatch at length {}", len);
+        }
+    }
+
+    #[test]
+    fn test_wrong_key_rejects() {
+        let seed = b"wrong_key";
+        let mut salt = [0u8; SALT_LEN];
+        fill_random(&mut salt);
+        let key1 = gene3_with_salt(seed, &salt);
+        let key2 = gene3_with_salt(key1.expose_secret(), &salt);
+        let data = b"auth by hmac".to_vec();
+
+        let mut round_keys = Vec::new();
+        for _ in 0..ROUND {
+            let mut r = [0u8; 8]; fill_random(&mut r);
+            round_keys.push(u64::from_le_bytes(r).to_string().into_bytes());
+        }
+
+        let enc = encrypt3_final(data, &key1, &key2, &round_keys).unwrap();
+
+        // Wrong key1
+        let key1w = gene3_with_salt(b"other", &salt);
+        assert!(decrypt3_final(enc.clone(), &key1w, &key2, &round_keys).is_err());
+
+        // Wrong key2
+        let key2w = gene3_with_salt(b"another", &salt);
+        assert!(decrypt3_final(enc, &key1, &key2w, &round_keys).is_err());
+    }
+
+    #[test]
+    fn test_randomized_roundtrip() {
+        let seed = b"randomized_roundtrip";
+        let mut salt = [0u8; SALT_LEN];
+        fill_random(&mut salt);
+        let key1 = gene3_with_salt(seed, &salt);
+        let key2 = gene3_with_salt(key1.expose_secret(), &salt);
+
+        let mut rng = rand::thread_rng();
+        for _ in 0..8 {
+            let len = rng.gen_range(0..5000);
+            let mut data = vec![0u8; len];
+            rng.fill(&mut data[..]);
+
+            let mut round_keys = Vec::new();
+            for _ in 0..ROUND {
+                let mut r = [0u8; 8]; fill_random(&mut r);
+                round_keys.push(u64::from_le_bytes(r).to_string().into_bytes());
+            }
+
+            let enc = encrypt3_final(data.clone(), &key1, &key2, &round_keys).unwrap();
+            let dec = decrypt3_final(enc, &key1, &key2, &round_keys).unwrap();
+            assert_eq!(dec, data);
+        }
+    }
+
+    #[test]
+    fn test_hmac_tag_corruption() {
+        let seed = b"tag_corruption";
+        let mut salt = [0u8; SALT_LEN];
+        fill_random(&mut salt);
+        let key1 = gene3_with_salt(seed, &salt);
+        let key2 = gene3_with_salt(key1.expose_secret(), &salt);
+        let data = b"detect tamper".to_vec();
+
+        let mut round_keys = Vec::new();
+        for _ in 0..ROUND {
+            let mut r = [0u8; 8]; fill_random(&mut r);
+            round_keys.push(u64::from_le_bytes(r).to_string().into_bytes());
+        }
+
+        let mut enc = encrypt3_final(data, &key1, &key2, &round_keys).unwrap();
+        let last = enc.len()-1; enc[last] ^= 0xFF;
+        assert!(decrypt3_final(enc, &key1, &key2, &round_keys).is_err());
+    }
+
+    #[test]
+    fn test_decrypt_too_short_error() {
+        let seed = b"too_short";
+        let mut salt = [0u8; SALT_LEN];
+        fill_random(&mut salt);
+        let key1 = gene3_with_salt(seed, &salt);
+        let key2 = gene3_with_salt(key1.expose_secret(), &salt);
+
+        let bogus = vec![0u8; SALT_LEN + 2 + 31]; // shorter than minimum with tag
+        assert!(decrypt3_final(bogus, &key1, &key2, &Vec::new()).is_err());
+    }
+
+    #[test]
+    fn test_unicode_roundtrip() {
+        let seed = b"unicode";
+        let mut salt = [0u8; SALT_LEN];
+        fill_random(&mut salt);
+        let key1 = gene3_with_salt(seed, &salt);
+        let key2 = gene3_with_salt(key1.expose_secret(), &salt);
+
+        let text = "Hello, 世界 👋🏽✨🚀".as_bytes().to_vec();
+        let mut round_keys = Vec::new();
+        for _ in 0..ROUND {
+            let mut r = [0u8; 8]; fill_random(&mut r);
+            round_keys.push(u64::from_le_bytes(r).to_string().into_bytes());
+        }
+
+        let enc = encrypt3_final(text.clone(), &key1, &key2, &round_keys).unwrap();
+        let dec = decrypt3_final(enc, &key1, &key2, &round_keys).unwrap();
+        assert_eq!(dec, text);
+    }
+
+    #[test]
+    fn test_repeated_encryption_differs() {
+        let seed = b"nonce_randomness";
+        let mut salt = [0u8; SALT_LEN];
+        fill_random(&mut salt);
+        let key1 = gene3_with_salt(seed, &salt);
+        let key2 = gene3_with_salt(key1.expose_secret(), &salt);
+        let data = b"same plaintext".to_vec();
+
+        let mut round_keys = Vec::new();
+        for _ in 0..ROUND {
+            let mut r = [0u8; 8]; fill_random(&mut r);
+            round_keys.push(u64::from_le_bytes(r).to_string().into_bytes());
+        }
+
+        let c1 = encrypt3_final(data.clone(), &key1, &key2, &round_keys).unwrap();
+        let c2 = encrypt3_final(data, &key1, &key2, &round_keys).unwrap();
+        assert_ne!(c1, c2, "Encryption should be randomized across runs");
+    }
 
 }
