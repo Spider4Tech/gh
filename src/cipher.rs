@@ -411,13 +411,13 @@ pub fn build_cipher_cache(
         || {
             k1_ref
                 .par_iter()
-                .map(|&c| c & 0xFF)
+                .map(|&c| c )
                 .collect::<Vec<u8>>()
         },
         || {
             k2_ref
                 .par_iter()
-                .map(|&c| c & 0xFF)
+                .map(|&c| c )
                 .collect::<Vec<u8>>()
         },
     );
@@ -625,12 +625,12 @@ pub fn encrypt3_final(
     let rounds = std::cmp::min(ROUND, round_keys.len());
     println!("Encrypting {rounds} rounds");
 
-    let mut r = 0usize;
-    while r < rounds {
+    for r in 0..rounds {
         println!("  Round {}", r + 1);
         let round_seed = derive_round_seed(&run_salt, r as u32);
-        
-        let (xor_key, rot_key) = derive_subkeys_with_salt_and_seed(key1, key2, &run_salt, &round_seed);
+
+        let (xor_key, rot_key) =
+            derive_subkeys_with_salt_and_seed(key1, key2, &run_salt, &round_seed);
 
         let cache = build_cipher_cache(key1, key2, &run_salt, &round_seed, body.len());
 
@@ -641,8 +641,6 @@ pub fn encrypt3_final(
         let start_shift = Instant::now();
         body = shift_bits_with_rot_key_par(body, &rot_key);
         println!("    Bit shift: {:?}", start_shift.elapsed());
-
-        r += 1;
     }
 
     let hmac_key = derive_hmac_key_final(key1, key2, &run_salt);
@@ -652,18 +650,17 @@ pub fn encrypt3_final(
     header.push(VERSION);
     header.push(ALG_ID);
 
-    // Compute HMAC and write output with a single allocation
     let hmac_tag = compute_hmac(&hmac_key, &header, &body);
-    let mut output = Vec::with_capacity(header.len() + body.len() + hmac_tag.len());
-    unsafe { output.set_len(output.capacity()); }
-    let (mut o1, rest) = output.split_at_mut(header.len());
-    o1.copy_from_slice(&header);
-    let (mut o2, mut o3) = rest.split_at_mut(body.len());
-    o2.copy_from_slice(&body);
-    o3.copy_from_slice(&hmac_tag);
+
+    let total_len = header.len() + body.len() + hmac_tag.len();
+    let mut output = Vec::with_capacity(total_len);
+    output.extend_from_slice(&header);
+    output.extend_from_slice(&body);
+    output.extend_from_slice(&hmac_tag);
 
     Ok(output)
 }
+
 
 pub fn decrypt3_final(
     encrypted_data: Vec<u8>,
