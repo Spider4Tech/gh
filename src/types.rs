@@ -3,7 +3,7 @@ use once_cell::sync::Lazy;
 use zeroize::Zeroize;
 
 /// Length of cryptographic keys in bytes
-pub const KEY_LENGTH: usize = 2512;
+pub const KEY_LENGTH: usize = 1024;
 
 /// Length of salt values in bytes
 pub const SALT_LEN: usize = 32;
@@ -15,10 +15,10 @@ pub const VERSION: u8 = 9;
 pub const ALG_ID: u8 = 173;
 
 /// Chunk size for Blake3 keystream generation in bytes
-pub const BLAKE3_KEYSTREAM_CHUNK: usize = 65536;
+pub const BLAKE3_KEYSTREAM_CHUNK: usize = 16384;
 
 /// Optimal chunk size for parallel processing in bytes
-pub const OPTIMAL_CHUNK_SIZE: usize = 65536;
+pub const OPTIMAL_CHUNK_SIZE: usize = 8192;
 
 /// Number of encryption rounds to perform
 pub const ROUND: usize = 4;
