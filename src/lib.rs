@@ -684,7 +684,7 @@ use crate::SALT_LEN;
                 }
             }
         }
-        assert!(max_bias < 0.2, "S-Box has detectable linear approximations (max bias: {})", max_bias);
+        assert!(max_bias < 0.10, "S-Box has detectable linear approximations (max bias: {})", max_bias);
     }
 
     #[test]

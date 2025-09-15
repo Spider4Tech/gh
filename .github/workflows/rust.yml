@@ -15,4 +15,6 @@ jobs:
         with:
           toolchain: stable
       - name: Run tests
-        run: cargo test --verbose
+        run: cargo test --verbose -- --nocapture
+        env:
+          RUSTFLAGS: "-A unused_variables -A dead_code"

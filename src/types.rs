@@ -15,7 +15,7 @@ pub const VERSION: u8 = 9;
 pub const ALG_ID: u8 = 173;
 
 /// Chunk size for Blake3 keystream generation in bytes
-pub const BLAKE3_KEYSTREAM_CHUNK: usize = 16384;
+pub const BLAKE3_KEYSTREAM_CHUNK: usize = 65536;
 
 /// Optimal chunk size for parallel processing in bytes
 pub const OPTIMAL_CHUNK_SIZE: usize = 65536;
@@ -41,9 +41,9 @@ pub struct CipherCache {
     /// Character transformation table
     pub characters: [u8; 256],
     /// Key1-derived character indices
-    pub key1_chars: Vec<usize>,
+    pub key1_chars: Vec<u8>,
     /// Key2-derived character indices
-    pub key2_chars: Vec<usize>,
+    pub key2_chars: Vec<u8>,
 }
 
 /// Cache key for identifying unique cipher cache entries
