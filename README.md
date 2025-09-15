@@ -279,7 +279,7 @@ criterion_main!(benches);
 
 ## **License**
 
-This project is licensed under the **MIT License** – see [LICENSE](LICENSE) for details.
+This project is distributed under the AGPLv3 license (see LICENSE).
 
 ---
 
