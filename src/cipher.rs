@@ -1,5 +1,6 @@
 use crate::crypto::*;
 use crate::types::*;
+use poly1305::{Poly1305, UniversalKey};
 use rayon::prelude::*;
 use secrecy::{ExposeSecret, Secret};
 use std::error::Error;
@@ -643,20 +644,20 @@ pub fn encrypt3_final(
         println!("    Bit shift: {:?}", start_shift.elapsed());
     }
 
-    let hmac_key = derive_hmac_key_final(key1, key2, &run_salt);
+    let poly_key = derive_poly1305_key_final(key1, key2, &run_salt);
 
     let mut header = Vec::with_capacity(SALT_LEN + 2);
     header.extend_from_slice(&run_salt);
     header.push(VERSION);
     header.push(ALG_ID);
 
-    let hmac_tag = compute_hmac(&hmac_key, &header, &body);
+    let poly_tag = compute_poly1305(&poly_key, &header, &body);
 
-    let total_len = header.len() + body.len() + hmac_tag.len();
+    let total_len = header.len() + body.len() + poly_tag.len();
     let mut output = Vec::with_capacity(total_len);
     output.extend_from_slice(&header);
     output.extend_from_slice(&body);
-    output.extend_from_slice(&hmac_tag);
+    output.extend_from_slice(&poly_tag);
 
     Ok(output)
 }
@@ -668,7 +669,7 @@ pub fn decrypt3_final(
     key2: &Secret<Vec<u8>>,
     round_keys: &[Vec<u8>],
 ) -> Result<Vec<u8>, Box<dyn Error>> {
-    if encrypted_data.len() < SALT_LEN + 2 + 32 {
+    if encrypted_data.len() < SALT_LEN + 2 + 16 {
         return Err("Data too short".into());
     }
 
@@ -682,14 +683,14 @@ pub fn decrypt3_final(
         return Err("Invalid version or algorithm ID".into());
     }
 
-    let split_point = encrypted_data.len() - 32;
+    let split_point = encrypted_data.len() - 16;
     let header = &encrypted_data[0..SALT_LEN + 2];
     let body = &encrypted_data[SALT_LEN + 2..split_point];
-    let hmac_tag = &encrypted_data[split_point..];
+    let poly_tag = &encrypted_data[split_point..];
 
-    let hmac_key = derive_hmac_key_final(key1, key2, &run_salt);
-    if !verify_hmac(&hmac_key, header, body, hmac_tag) {
-        return Err("HMAC verification failed".into());
+    let poly_key = derive_poly1305_key_final(key1, key2, &run_salt);
+    if !verify_poly1305(&poly_key, header, body, poly_tag) {
+        return Err("Poly1305 verification failed".into());
     }
 
     let mut plaintext = body.to_vec();
