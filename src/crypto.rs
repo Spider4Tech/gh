@@ -11,6 +11,22 @@ use zeroize::Zeroize;
 
 type HmacSha256 = Hmac<Sha256>;
 
+fn gf256_mul(mut a: u8, mut b: u8) -> u8 {
+    let mut res = 0u8;
+    while b != 0 {
+        if b & 1 != 0 {
+            res ^= a;
+        }
+        let hi = a & 0x80;
+        a <<= 1;
+        if hi != 0 {
+            a ^= 0x1B; // polynôme AES x^8 + x^4 + x^3 + x + 1
+        }
+        b >>= 1;
+    }
+    res
+}
+
 /// Generates a custom cryptographically secure S-Box from a 32-byte key
 /// 
 /// This function creates a non-linear, key-dependent substitution box
@@ -27,7 +43,6 @@ type HmacSha256 = Hmac<Sha256>;
 /// Generates a custom cryptographically secure S-Box from a key
 /// Uses multiple rounds of non-linear mixing for strong diffusion and confusion
 pub fn generate_custom_sbox(key: &[u8]) -> [u8; 256] {
-    // AES S-box table (standard)
     const AES_SBOX: [u8; 256] = [
         0x63,0x7c,0x77,0x7b,0xf2,0x6b,0x6f,0xc5,0x30,0x01,0x67,0x2b,0xfe,0xd7,0xab,0x76,
         0xca,0x82,0xc9,0x7d,0xfa,0x59,0x47,0xf0,0xad,0xd4,0xa2,0xaf,0x9c,0xa4,0x72,0xc0,
@@ -47,53 +62,47 @@ pub fn generate_custom_sbox(key: &[u8]) -> [u8; 256] {
         0x8c,0xa1,0x89,0x0d,0xbf,0xe6,0x42,0x68,0x41,0x99,0x2d,0x0f,0xb0,0x54,0xbb,0x16,
     ];
 
-    // derive an odd multiplier in 1..255 from key so multiplication mod 256 is invertible
-    let mul: u8 = if key.is_empty() {
-        5u8 // arbitrary odd fallback
-    } else {
-        // combine some key bytes to produce a value, force odd and non-zero
-        let mut v: u16 = 0x0101;
-        for (i, &b) in key.iter().enumerate().take(8) {
-            v = v.wrapping_mul((b as u16).wrapping_add((i as u16) + 1));
+    let mut attempt = 0u32;
+    loop {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(b"sbox-params");
+        hasher.update(key);
+        hasher.update(&attempt.to_le_bytes());
+        let mut reader = hasher.finalize_xof();
+
+        let mut mul_bytes = [0u8; 1];
+        reader.fill(&mut mul_bytes);
+        let mut mul = mul_bytes[0];
+        if mul == 0 { mul = 1; }
+
+        let mut mask_bytes = [0u8; 1];
+        reader.fill(&mut mask_bytes);
+        let mask = mask_bytes[0];
+
+        let mut sbox = [0u8; 256];
+        for i in 0..256 {
+            let base = AES_SBOX[i];
+            let t = gf256_mul(base, mul) ^ mask;
+            sbox[i] = t;
         }
-        let mut m = (v as u8) | 1; // ensure odd
-        if m == 0 { m = 1; }
-        m
-    };
 
-    // derive XOR mask bytes from key (cycled)
-    let xor_mask = if key.is_empty() { vec![0x63u8] } else { key.to_vec() };
-
-    let mut sbox = [0u8; 256];
-    for i in 0..256 {
-        let base = AES_SBOX[i];
-        // bijective transform: multiply by odd (invertible mod 256) then xor by key-derived mask
-        let m = base.wrapping_mul(mul);
-        let k = xor_mask[i % xor_mask.len()];
-        sbox[i] = m ^ k;
-    }
-
-    // final check: ensure bijectivity (should hold). If collision found, fallback to AES S-box.
-    {
         let mut seen = [false; 256];
-        let mut collision = false;
+        let mut ok = true;
         for &v in sbox.iter() {
             if seen[v as usize] {
-                collision = true;
+                ok = false;
                 break;
             }
             seen[v as usize] = true;
         }
-        if collision {
-            // fallback to AES SBOX (bijective)
-            sbox.copy_from_slice(&AES_SBOX);
+
+        if ok {
+            return sbox;
+        } else {
+            attempt = attempt.wrapping_add(1);
         }
     }
-
-    sbox
 }
-
-
 
 
 /// Generates the inverse of a custom S-Box
