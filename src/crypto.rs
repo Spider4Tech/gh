@@ -2,14 +2,11 @@ use crate::types::*;
 use argon2::{Argon2, Params};
 use blake3::Hasher;
 use hkdf::Hkdf;
-use hmac::{Hmac, KeyInit, Mac};
+use poly1305::{Key, UniversalKey};
 use ring::rand::{SecureRandom, SystemRandom};
 use secrecy::{ExposeSecret, Secret};
 use sha2::Sha256;
-use subtle::ConstantTimeEq;
 use zeroize::Zeroize;
-
-type HmacSha256 = Hmac<Sha256>;
 
 fn gf256_mul(mut a: u8, mut b: u8) -> u8 {
     let mut res = 0u8;
@@ -319,122 +316,90 @@ pub fn derive_subkeys_with_salt_and_seed(
     (xor_key, rot_key)
 }
 
-/// Derives the final HMAC key for message authentication
+/// Derives the final Poly1305 key for message authentication
 /// 
-/// Creates a 32-byte HMAC key from the provided secret keys and salt,
+/// Creates a 32-byte Poly1305 key from the provided secret keys and salt,
 /// used for authenticating the encrypted data and preventing tampering.
 /// 
 /// # Arguments
 /// 
-/// * `key1` - First secret key for HMAC key derivation
-/// * `key2` - Second secret key for HMAC key derivation
+/// * `key1` - First secret key for Poly1305 key derivation
+/// * `key2` - Second secret key for Poly1305 key derivation
 /// * `salt` - Salt value for key derivation
 /// 
 /// # Returns
 /// 
-/// A 32-byte HMAC key for message authentication
+/// A 32-byte Poly1305 key for message authentication
 /// 
 /// # Security
 /// 
 /// Intermediate key material is securely zeroed after use.
-pub fn derive_hmac_key_final(key1: &Secret<Vec<u8>>, key2: &Secret<Vec<u8>>, salt: &[u8]) -> Vec<u8> {
+pub fn derive_poly1305_key_final(key1: &Secret<Vec<u8>>, key2: &Secret<Vec<u8>>, salt: &[u8]) -> [u8; 32] {
     let k1 = key1.expose_secret();
     let k2 = key2.expose_secret();
     let mut ikm = Vec::with_capacity(k1.len() + k2.len());
     ikm.extend_from_slice(k1);
     ikm.extend_from_slice(k2);
     let hk = Hkdf::<Sha256>::new(Some(salt), &ikm);
-    let mut hmac_key = vec![0u8; 32];
-    hk.expand(b"hmac_final_v1", &mut hmac_key)
-        .expect("hkdf hmac final");
+    let mut poly_key = [0u8; 32];
+    hk.expand(b"poly1305_final_v1", &mut poly_key)
+        .expect("hkdf poly1305 final");
     ikm.zeroize();
-    hmac_key
+    poly_key
 }
 
-/// Generates a strong cryptographic key using Argon2 password hashing
-/// 
-/// Derives a high-entropy secret key from seed material using Argon2id,
-/// a memory-hard password hashing function resistant to brute-force attacks.
-/// The result is further processed with HKDF for key expansion.
-/// 
-/// # Arguments
-/// 
-/// * `seed` - Source entropy for key generation
-/// * `salt` - Salt value to prevent rainbow table attacks
-/// 
-/// # Returns
-/// 
-/// A Secret-wrapped vector containing KEY_LENGTH bytes of key material
-/// 
-/// # Security
-/// 
-/// Uses Argon2id with secure parameters (8192 KB memory, 2 iterations, 4 parallelism).
-/// Intermediate outputs are securely cleared from memory.
-pub fn gene3_with_salt(seed: &[u8], salt: &[u8]) -> Secret<Vec<u8>> {
-    let params = Params::new(8192, 2, 4, None).expect("params");
-    let argon2 = Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params);
-    let mut out = vec![0u8; 64];
-    argon2
-        .hash_password_into(seed, salt, &mut out)
-        .expect("argon2");
-    let hk = Hkdf::<Sha256>::new(Some(salt), &out);
-    let mut okm = vec![0u8; KEY_LENGTH];
-    hk.expand(b"key_expand_v1", &mut okm).expect("hkdf expand");
-    out.zeroize();
-    Secret::new(okm)
-}
-
-/// Computes HMAC-SHA256 authentication tag for message integrity
+/// Computes Poly1305 authentication tag for message integrity
 /// 
 /// Generates a cryptographic message authentication code over the provided
-/// header and ciphertext data using HMAC with SHA-256.
+/// header and ciphertext data using Poly1305.
 /// 
 /// # Arguments
 /// 
-/// * `hmac_key` - Secret key for HMAC computation
+/// * `poly_key` - Secret key for Poly1305 computation
 /// * `header` - Header data to authenticate
 /// * `ciphertext` - Encrypted data to authenticate
 /// 
 /// # Returns
 /// 
-/// HMAC tag as a vector of bytes
+/// Poly1305 tag as a 16-byte array
 /// 
 /// # Panics
 /// 
-/// Panics if the HMAC key length is invalid
-pub fn compute_hmac(hmac_key: &[u8], header: &[u8], ciphertext: &[u8]) -> Vec<u8> {
-    let mut mac = HmacSha256::new_from_slice(hmac_key).expect("hmac key");
-    mac.update(header);
-    mac.update(ciphertext);
-    mac.finalize().into_bytes().to_vec()
+/// Panics if the Poly1305 key length is invalid
+pub fn compute_poly1305(poly_key: &[u8; 32], header: &[u8], ciphertext: &[u8]) -> [u8; 16] {
+    let key = UniversalKey::from_slice(poly_key);
+    let mut poly = poly1305::Poly1305::new(key);
+    poly.update(header);
+    poly.update(ciphertext);
+    poly.finalize().into_bytes()
 }
 
-/// Verifies HMAC-SHA256 authentication tag in constant time
+/// Verifies Poly1305 authentication tag in constant time
 /// 
-/// Validates the integrity and authenticity of data by recomputing the HMAC
+/// Validates the integrity and authenticity of data by recomputing the Poly1305
 /// and comparing it against the provided tag using constant-time comparison
 /// to prevent timing attacks.
 /// 
 /// # Arguments
 /// 
-/// * `hmac_key` - Secret key for HMAC verification
+/// * `poly_key` - Secret key for Poly1305 verification
 /// * `header` - Header data to verify
 /// * `ciphertext` - Encrypted data to verify
-/// * `tag` - Expected HMAC tag to validate against
+/// * `tag` - Expected Poly1305 tag to validate against
 /// 
 /// # Returns
 /// 
-/// `true` if the HMAC is valid, `false` otherwise
+/// `true` if the Poly1305 is valid, `false` otherwise
 /// 
 /// # Security
 /// 
 /// Uses constant-time comparison to prevent timing side-channel attacks.
-pub fn verify_hmac(hmac_key: &[u8], header: &[u8], ciphertext: &[u8], tag: &[u8]) -> bool {
-    let mut mac = HmacSha256::new_from_slice(hmac_key).expect("hmac key");
-    mac.update(header);
-    mac.update(ciphertext);
-    let computed_tag = mac.finalize().into_bytes();
-    computed_tag.ct_eq(tag).into()
+pub fn verify_poly1305(poly_key: &[u8; 32], header: &[u8], ciphertext: &[u8], tag: &[u8; 16]) -> bool {
+    let key = UniversalKey::from_slice(poly_key);
+    let mut poly = poly1305::Poly1305::new(key);
+    poly.update(header);
+    poly.update(ciphertext);
+    poly.verify(tag).is_ok()
 }
 
 /// Builds a character substitution table for encryption operations
