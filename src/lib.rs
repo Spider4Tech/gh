@@ -1,4 +1,4 @@
-// Horizon Cryptographic Library v0.9.4
+// Horizon Cryptographic Library v0.9.5
 
 pub mod types;
 pub mod crypto;
@@ -89,16 +89,16 @@ use crate::SALT_LEN;
         assert_eq!(original_data, decrypted, "Decryption must match the original message");
     }
 
-    // Test d'intégrité des données (HMAC)
+    // Test d'intégrité des données (Poly1305)
     #[test]
-    fn test_hmac_integrity() {
-        let seed = b"test_seed_for_hmac";
+    fn test_poly1305_integrity() {
+        let seed = b"test_seed_for_poly1305";
         let mut salt = [0u8; SALT_LEN];
         fill_random(&mut salt);
         let key1 = gene3_with_salt(seed, &salt);
         let key2 = gene3_with_salt(key1.expose_secret(), &salt);
 
-        let original_data = b"Test HMAC integrity".to_vec();
+        let original_data = b"Test Poly1305 integrity".to_vec();
         let mut round_keys = Vec::new();
         for _ in 0..ROUND {
             let mut rnum = [0u8; 8];
@@ -112,7 +112,7 @@ use crate::SALT_LEN;
         if !tampered.is_empty() {
             tampered[SALT_LEN + 2] ^= 0xFF; // Flip a bit in the body
             let result = decrypt3_final(tampered, &key1, &key2, &round_keys);
-            assert!(result.is_err(), "Decryption must fail if HMAC is invalid");
+            assert!(result.is_err(), "Decryption must fail if Poly1305 MAC is invalid");
         }
     }
 
