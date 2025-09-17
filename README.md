@@ -3,7 +3,6 @@
 **A high-performance, secure, and parallelized cryptographic library for Rust, optimized for modern hardware and resistant to side-channel attacks.**
 
 [![Crates.io](https://img.shields.io/crates/v/horizon.svg)](https://crates.io/crates/horizon)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust](https://github.com/Spider4Tech/gh/actions/workflows/rust.yml/badge.svg)](https://github.com/Spider4Tech/gh/actions/workflows/rust.yml)
 [![Clippy](https://github.com/Spider4Tech/gh/actions/workflows/clippy.yml/badge.svg)](https://github.com/Spider4Tech/gh/actions/workflows/clippy.yml)
 
